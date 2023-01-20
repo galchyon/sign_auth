@@ -1,0 +1,113 @@
+from google.colab import drive
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.model_selection import train_test_split
+import pylab
+pylab.rcParams['figure.figsize'] = (15, 10)
+import matplotlib.pyplot as plt
+from keras import backend as K
+from tensorflow.keras.layers import Dense, GaussianNoise
+from sklearn.ensemble import AdaBoostClassifier
+import xgboost as xgb
+from xgboost.sklearn import XGBClassifier
+
+#метрики
+def recall_m(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+def precision_m(y_true, y_pred):
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
+
+def f1_m(y_true, y_pred):
+    precision = precision_m(y_true, y_pred)
+    recall = recall_m(y_true, y_pred)
+    return 2*((precision*recall)/(precision+recall+K.epsilon()))
+    
+def display_f1_m():
+    plt.plot(results.history['f1_m'])
+    plt.plot(results.history['val_f1_m'])
+
+    plt.title('Model accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Test'], loc='upper left')
+    plt.show()
+
+def display_loss():
+    plt.plot(results.history['loss'])
+    plt.plot(results.history['val_loss'])
+
+    plt.title('Model loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Test'], loc='upper left')
+    plt.show()
+    
+#загрузка данных
+itog = np.loadtxt('/content/drive/MyDrive/Small.csv', delimiter=",")
+df = pd.read_csv('/content/drive/MyDrive/Small.csv', delimiter=",", header=None)
+
+#not normalized
+out1 = itog[:,288]
+itog1 = itog[:,:288]
+
+scaler = preprocessing.StandardScaler()
+df_n = scaler.fit_transform(df)
+
+#normalized
+out_n = itog[:,288]
+itog_n = df_n[:,:288]
+
+#normalized
+X_train_n,X_test_n,Y_train_n,Y_test_n = train_test_split(itog_n,out_n,test_size=0.2)
+
+#not normalized
+X_train,X_test,Y_train,Y_test = train_test_split(itog1,out1,test_size=0.2)
+
+#сначала посмотрим на результаты работы нейросети
+
+model = Sequential()
+model.add(GaussianNoise(0.15,input_shape=(288,),name="noise_layer"))
+model.add(Dense(30,activation='relu',input_shape=(288,)))
+model.add(Dense(50,activation='relu',input_shape=(288,)))
+model.add(GaussianNoise(0.15,input_shape=(288,),name="noise_layer2"))
+model.add(Dense(50,activation='relu',input_shape=(288,)))
+model.add(Dense(80,activation='relu',input_shape=(288,)))
+model.add(Dense(50,activation='relu',input_shape=(288,)))
+model.add(Dense(30,activation='relu',input_shape=(288,)))
+model.add(Dense(1,activation='sigmoid'))
+
+model.compile(loss='binary_crossentropy',
+              optimizer='adam',
+              metrics=[f1_m])
+
+results = model.fit(X_train_n,Y_train_n,validation_data = (X_test_n,Y_test_n),batch_size = 64,epochs=100)
+display_f1_m()
+display_loss()
+
+#посмотрим на работу AdaBoostClassifier
+
+bdt = AdaBoostClassifier(tree.DecisionTreeClassifier(max_depth=10, min_samples_split=20, min_samples_leaf=5), algorithm="SAMME",n_estimators=200, learning_rate=0.8)
+bdt.fit(X_train, Y_train)
+f1_2 = f1_m(Y_test, K.round(bdt.predict_proba(X_test)[:,1]))
+
+#проведем анализ с XGBoost Classifier
+
+xgb1 = XGBClassifier(learning_rate = 0.1, n_estimators=1000, max_depth=5, subsample=0.8, objective='binary:logistic', seed=27)
+xgb1.fit(X_train, Y_train)
+Y_test_32 = Y_test.astype('float32')
+f1_3 = f1_m(Y_test_32, K.round(xgb1.predict_proba(X_test)[:,1]))
+
+#результаты:
+# сеть 0.9680385589599609
+# AdaBoost 0.9520975400419684
+# XGBoos 0.9711957573890686
